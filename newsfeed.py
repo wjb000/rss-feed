@@ -34,7 +34,6 @@ rss_feeds = [
     ('CNBC - Business', 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114')
 ]
 
-
 async def fetch_feed(session, feed_name, feed_url):
     async with session.get(feed_url) as response:
         content = await response.text()
@@ -50,39 +49,34 @@ async def fetch_feed(session, feed_name, feed_url):
             news_items.append(news_item)
         return news_items
 
-async def fetch_news(news_table, loop):
+async def fetch_news(news_table):
     async with aiohttp.ClientSession() as session:
-        while True:
-            tasks = []
-            for feed_name, feed_url in rss_feeds:
-                task = asyncio.create_task(fetch_feed(session, feed_name, feed_url))
-                tasks.append(task)
-            all_news = await asyncio.gather(*tasks)
-            news_items = [item for sublist in all_news for item in sublist]
-            loop.call_soon_threadsafe(update_news, news_items, news_table)
-            await asyncio.sleep(1800) 
+        tasks = []
+        for feed_name, feed_url in rss_feeds:
+            task = asyncio.create_task(fetch_feed(session, feed_name, feed_url))
+            tasks.append(task)
+        all_news = await asyncio.gather(*tasks)
+        news_items = [item for sublist in all_news for item in sublist]
+        update_news(news_items, news_table)
 
 def update_news(news_items, news_table):
     news_items.sort(key=lambda x: x['published'], reverse=True)
     utc_zone = pytz.utc
     local_timezone = pytz.timezone('America/Chicago')
-    
-    existing_links = set()
-    for item in news_table.get_children():
-        existing_links.add(news_table.item(item)['values'][3])
-    
-    new_items = [item for item in news_items if item['link'] not in existing_links]
-    
-    for item in reversed(new_items):
+
+    news_table.delete(*news_table.get_children())
+
+    for item in news_items:
         published_time_utc = datetime(*item['published'][:6], tzinfo=utc_zone)
         published_time_local = published_time_utc.astimezone(local_timezone)
         published_time_str = published_time_local.strftime('%m-%d %I:%M %p')
-        news_table.insert('', 0, values=(item['title'], published_time_str, item['source'], item['link']), tags=('new',))
+        news_table.insert('', 'end', values=(item['title'], published_time_str, item['source'], item['link']))
 
-def run_asyncio_loop(news_table):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(fetch_news(news_table, loop))
+def open_link(event):
+    item = event.widget.focus()
+    if item:
+        link = event.widget.item(item, 'values')[3]
+        webbrowser.open(link)
 
 def run_gui():
     root = tk.Tk()
@@ -109,11 +103,17 @@ def run_gui():
     news_table.column('Link', width=0, stretch=False)
     news_table.grid(row=0, column=0, sticky='nsew')
 
+    news_table.bind('<Double-1>', open_link)
+
     scrollbar = ttk.Scrollbar(frame, orient='vertical', command=news_table.yview)
     scrollbar.grid(row=0, column=1, sticky='ns')
     news_table.configure(yscrollcommand=scrollbar.set)
 
-    threading.Thread(target=run_asyncio_loop, args=(news_table,), daemon=True).start()
+    def refresh_news():
+        asyncio.run(fetch_news(news_table))
+        root.after(30000, refresh_news)
+
+    refresh_news()
 
     root.mainloop()
 
