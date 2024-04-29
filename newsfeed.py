@@ -66,8 +66,13 @@ def update_news(news_items, news_table):
     news_items.sort(key=lambda x: x['published'], reverse=True)
     utc_zone = pytz.utc
     local_timezone = pytz.timezone('America/Chicago')
-    existing_links = set(news_table.item(item)['values'][3] for item in news_table.get_children())
+    
+    existing_links = set()
+    for item in news_table.get_children():
+        existing_links.add(news_table.item(item)['values'][3])
+    
     new_items = [item for item in news_items if item['link'] not in existing_links]
+    
     for item in reversed(new_items):
         published_time_utc = datetime(*item['published'][:6], tzinfo=utc_zone)
         published_time_local = published_time_utc.astimezone(local_timezone)
